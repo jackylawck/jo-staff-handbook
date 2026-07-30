@@ -13,7 +13,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 # 1. 頁面配置與 UI 樣式
 # ==========================================
 st.set_page_config(
-    page_title="東淦智能員工手冊查詢系統",
+    page_title="東淦員工手冊智能查詢系統",
     page_icon="🏗️",
     layout="wide"
 )
@@ -44,7 +44,6 @@ st.markdown("""
 
 # ==========================================
 # 2. 🛡️ 員工手冊目錄導航矩陣 (Metadata Routing Map)
-# 作用：將口語查詢映射到特定的章節與標題，提高向量檢索的精準度，絕不包含具體條文內容。
 # ==========================================
 MANUAL_STRUCTURE_MAP = {
     "僱傭與離職": {
@@ -91,7 +90,6 @@ def expand_hr_query_semantics(query):
 
 @st.cache_resource(show_spinner="🔒 正在啟動純本地安全語意組件...")
 def get_embedding_model():
-    # 使用多語言模型，完美支援繁體中文與廣東話
     return HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 
 # ==========================================
@@ -100,7 +98,6 @@ def get_embedding_model():
 def process_pdf_to_chunks(uploaded_file):
     chunks = []
     try:
-        # Streamlit 的 UploadedFile 需要先寫入暫存檔，PyPDFLoader 才能讀取
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
             tmp_file.write(uploaded_file.getvalue())
             tmp_file_path = tmp_file.name
@@ -108,15 +105,12 @@ def process_pdf_to_chunks(uploaded_file):
         loader = PyPDFLoader(tmp_file_path)
         documents = loader.load()
         
-        # 針對員工手冊特性的切塊策略：確保條文不會被隨意截斷
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=600,
             chunk_overlap=100,
             separators=["\n第", "\n\n", "\n", "。", " "]
         )
         chunks = text_splitter.split_documents(documents)
-        
-        # 刪除暫存檔確保安全
         os.remove(tmp_file_path)
         
     except Exception as e:
@@ -124,22 +118,22 @@ def process_pdf_to_chunks(uploaded_file):
     return chunks
 
 # ==========================================
-# 4. 主畫面佈局
+# 4. 主畫面佈局 (已統一名稱與說明)
 # ==========================================
-st.title("🏗️ 東淦工程 (Jumbo Orient)")
-st.subheader("員工手冊智能查詢系統 (jo-staff)")
+st.title("🏗️ 東淦工程有限公司 (Jumbo Orient)")
+st.subheader("東淦員工手冊智能查詢系統 (jo-staff)")
 
 st.info(
     "🔒 **內部數據安全保障：**\n"
-    "本系統採用純本地數據比對技術，您上傳的 PDF 文件只會暫存在當前網頁會話中。"
-    "**當您關閉或重新整理網頁時，數據會立即被徹底銷毀**，絕對不會儲存到互聯網上，請放心使用。"
+    "本系統採用純本地數據比對技術，您上傳的《員工手冊》PDF 文件只會暫存在當前網頁會話中。"
+    "**當您關閉或重新整理網頁時，數據會獨立徹底銷毀**，絕對不會儲存到互聯網上，請放心使用。"
 )
 
 vector_db = None
 all_chunks = []
 
 with st.sidebar:
-    st.header("📂 手冊指引上傳")
+    st.header("📂 員工手冊上傳")
     uploaded_files = st.file_uploader(
         "請上傳公司《月薪員工手冊》PDF 檔案", 
         type=["pdf"], 
@@ -154,16 +148,16 @@ if uploaded_files:
         vector_db = FAISS.from_documents(all_chunks, embeddings)
 
 with st.sidebar:
-    st.header("📊 臨時知識庫狀態")
+    st.header("📊 知識庫加載狀態")
     st.write(f"📁 已加載檔案數：{len(uploaded_files) if uploaded_files else 0} 份")
-    st.write(f"🧩 解析精準段落：{len(all_chunks)} 段")
+    st.write(f"🧩 解析精準條文段落：{len(all_chunks)} 段")
     
     st.markdown("---")
     st.caption("🌐 **公司網站：** [jumboorient.com.hk](https://jumboorient.com.hk/)")
-    st.caption("⚙️ 系統支援：Jacky Law")
+    st.caption("⚙️ 系統支援：[Jacky Law](https://jackylawck.github.io/jackylawck/)")
 
 # ==========================================
-# 5. 智能對話與檢索介面
+# 5. 智能對話介面
 # ==========================================
 if 'jo_messages' not in st.session_state:
     st.session_state.jo_messages = []
@@ -182,22 +176,16 @@ if prompt := st.chat_input("請輸入您關於人事政策的疑問（例如：�
             st.error("🛑 **系統提示：** 請先在左側上傳《員工手冊》PDF 檔案，否則助理無法幫您翻查條文。")
             st.session_state.jo_messages.append({"role": "assistant", "content": "未上傳文件。"})
         else:
-            # 1. 經過矩陣擴展查詢字串
             enhanced_prompt = expand_hr_query_semantics(prompt)
-            
-            # 2. 進行相似度比對 (取前 2 個最相關段落)
             docs_and_scores = vector_db.similarity_search_with_score(enhanced_prompt, k=2)
             
             if docs_and_scores:
                 top_doc, top_score = docs_and_scores[0]
-                
-                # 分數轉換為信心指數 (FAISS L2 distance 越小越相關，此公式為簡單映射，可依實際模型調整)
                 confidence = max(60.0, min(99.9, (2.0 - top_score) * 50))
                 
-                # 合併相關段落內容作為輸出
                 combined_content = "<br><br>".join([doc.page_content.replace("\n", "<br>") for doc, score in docs_and_scores])
                 
-                st.success(f"🎯 **已為您透過「目錄矩陣」翻查到最相關的條文紀錄：**")
+                st.success(f"🎯 **已為您透過「目錄矩陣」翻查到最相關的手冊條文：**")
                 st.markdown(f"<div class='confidence-badge'>🎯 語意匹配度 {confidence:.1f}%</div>", unsafe_allow_html=True)
                 
                 response_html = (
