@@ -157,7 +157,7 @@ def get_embedding_model():
     return HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 
 # ==========================================
-# 4. 🧠 確定性頁碼映射與「頁首雜訊過濾器」
+# 4. 🧠 確定性頁碼映射與雜訊過濾器
 # ==========================================
 PAGE_CHAPTER_MAP = {
     2: "序言", 3: "遠景及使命", 4: "目錄", 
@@ -174,7 +174,7 @@ def get_chapter_by_page_and_text(doc_page_num, text_content):
     
     if "第九章" in text_content or "培訓和發展" in text_content or "培訓資助" in text_content:
         return "第九章 培訓和發展"
-    if "第三章" in text_content and "僱傭條款" in text_content:
+    if "第三章" in text_content and "僱傭條款" in text_content and "培訓" not in text_content:
         return "第三章 僱傭條款"
         
     current_ch = "通用條文"
@@ -373,7 +373,7 @@ if prompt:
 
                 st.markdown(f"<div class='confidence-badge'>✅ 綜合對答結果 (最新政策摘要 + 舊手冊對照)</div>", unsafe_allow_html=True)
                 
-                # 在回答最頂部加入 id="latest-answer" 錨點標籤
+                # 錨點標籤用來頂部對齊
                 response_html = (
                     f"<div id='latest-answer'></div>"
                     f"{routing_notice}"
@@ -387,7 +387,7 @@ if prompt:
                 st.markdown(response_html.replace(routing_notice, ""), unsafe_allow_html=True) 
                 st.session_state.jo_messages.append({"role": "assistant", "content": response_html})
                 
-                # 精準捲動至最新回答的頂部 (Top of Latest Answer)
+                # 精準將畫面平滑拉至最新回答頂部 (Top-View Focus)
                 st.components.v1.html(
                     "<script>var el = window.parent.document.getElementById('latest-answer'); if(el) { el.scrollIntoView({behavior: 'smooth', block: 'start'}); }</script>",
                     height=0
