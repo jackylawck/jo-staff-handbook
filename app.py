@@ -2,6 +2,7 @@ import streamlit as st
 import tempfile
 import os
 import re
+import json
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.embeddings import HuggingFaceEmbeddings
@@ -76,49 +77,27 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 📢 最新政策變動摘要 (Latest Policy Overrides)
-# 優先級最高：先回答最新變動摘要，並指引 Z Drive 路徑
+# 2. 📂 動態載入最新政策變動 (JSON 配置載入)
+# 解耦硬編碼，提高維護彈性與系統管治能力
 # ==========================================
-LATEST_POLICY_OVERRIDES = [
-    {
-        "id": "salary_structure_2026",
-        "keywords": ["雙糧", "13個月薪金", "年終雙糧", "花紅", "酌情花紅", "薪酬架構", "發放雙糧"],
-        "title": "📌 【最新薪酬架構】（2026年1月1日起生效）",
-        "summary": (
-            "• <b>制度調整：</b> 原年終雙糧制度已優化調整為與公司業績及個人表現掛鈎的<b>「酌情花紅制度」</b>。<br>"
-            "• <b>9月15日後入職：</b> 其年終花紅將由董事總經理按表現酌情處理。<br>"
-            "• <b>詳細文件請參閱：</b> <span class='z-drive-path'>Z:\\Hrd-Public Folder\\16.0 人力資源政策及指引</span> 內之最新通告。"
-        )
-    },
-    {
-        "id": "facial_recognition_2026",
-        "keywords": ["打卡", "拍卡", "人面識別", "外勤", "地盤打卡", "閘機", "忘記打卡", "考勤", "遲到"],
-        "title": "📌 【最新考勤及打卡指引 - 人面識別】（2026年1月1日起生效）",
-        "summary": (
-            "• <b>簽到方式：</b> 上下班及外勤均須以<b>人面識別</b>（固定設備或手機）完成「到場簽到、離場簽退」。<br>"
-            "• <b>地盤/工地要求：</b> 進出地盤須依主判規定於閘機打卡，並以手機人面識別完成「到達及離開各一次」簽到簽退。<br>"
-            "• <b>考勤修正截止：</b> 所有打卡時間修改申請必須於<b>每月「提交資料日」中午12:00前</b>獲主管批核完成，逾期按系統紀錄扣假/扣薪。<br>"
-            "• <b>詳細指引請參閱：</b> <span class='z-drive-path'>Z:\\Hrd-Public Folder\\16.0 人力資源政策及指引\\辦公時間及考勤指引 - 人面識別.pdf</span>"
-        )
-    },
-    {
-        "id": "training_subsidy_2025",
-        "keywords": ["培訓", "進修", "資助", "學費", "上堂", "CPD", "退還資助", "服務期"],
-        "title": "📌 【最新培訓資助政策】（2025年11月1日起生效）",
-        "summary": (
-            "• <b>申請類別：</b> 分為「公司推薦」（全額資助）與「個人發展（月薪，通過試用期）」（視課程層級及預算決定資助）。<br>"
-            "• <b>服務期承諾：</b> 資助金額 $1,000 或以下需承諾服務 1 個月，$15,001-$20,000 需承諾 24 個月。<br>"
-            "• <b>提前離職退還：</b> 服務承諾期內離職，須按未履行服務期比例退還資助金額。<br>"
-            "• <b>申請表格及詳情：</b> 請提交 HRF-011 / HRF-066 表格，完整文件請至 <span class='z-drive-path'>Z:\\Hrd-Public Folder\\16.0 人力資源政策及指引\\培訓資助政策.pdf</span>"
-        )
-    }
-]
+@st.cache_data(ttl=3600)
+def load_policy_overrides():
+    json_path = "policy_overrides.json"
+    if os.path.exists(json_path):
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            st.sidebar.warning(f"⚠️ 政策配置文件解析異常: {str(e)}")
+            return []
+    return []
 
 def check_policy_overrides(query):
+    overrides = load_policy_overrides()
     q_lower = query.lower()
     matched_overrides = []
-    for override in LATEST_POLICY_OVERRIDES:
-        if any(kw in q_lower for kw in override["keywords"]):
+    for override in overrides:
+        if any(kw in q_lower for kw in override.get("keywords", [])):
             matched_overrides.append(override)
     return matched_overrides
 
@@ -319,7 +298,7 @@ if not prompt and (ensemble_retriever is not None):
     if col4.button("🧧 年終花紅雙糧", use_container_width=True): prompt = "年終雙糧同花紅點樣計算？"
 
 # ==========================================
-# 7. 智能對話、最新變動優先與混合檢索
+# 7. 智能對話、最新變動動態載入與混合檢索
 # ==========================================
 for msg in st.session_state.jo_messages:
     with st.chat_message(msg["role"]):
@@ -336,7 +315,7 @@ if prompt:
             st.error(error_msg)
             st.session_state.jo_messages.append({"role": "assistant", "content": error_msg})
         else:
-            # 1. 優先檢查是否有最新政策變動摘要
+            # 1. 動態檢查 JSON 中的最新政策變動
             matched_overrides = check_policy_overrides(prompt)
             override_html = ""
             if matched_overrides:
@@ -347,7 +326,7 @@ if prompt:
                         f"</div>"
                     )
 
-            # 2. 進行章節路由
+            # 2. 進行章節路由與上下文維護
             routed_chapters = analyze_intent_and_route(prompt, st.session_state.last_chapters)
             st.session_state.last_chapters = routed_chapters
             
@@ -358,7 +337,7 @@ if prompt:
                 enhanced_prompt = f"{prompt} 相關章節聚焦：{chapters_str}"
                 routing_notice = f"<div class='routing-notice'>🔍 系統判定查詢意圖，已自動聚焦於：<b>{chapters_str}</b></div>"
 
-            # 3. 混合檢索舊版手冊原文（作為背景參考）
+            # 3. 混合檢索手冊歷史原文
             retrieved_docs = ensemble_retriever.invoke(enhanced_prompt)
             
             if retrieved_docs:
@@ -371,17 +350,21 @@ if prompt:
                         seen_content_signatures.add(clean_signature)
                         
                         chapter_tag = doc.metadata.get("chapter", "通用條文")
+                        source_file = doc.metadata.get("source_file", "員工手冊")
                         clean_content = doc.page_content.replace(f"[{chapter_tag}]\n", "").replace("\n", "<br>")
-                        combined_content += f"<span class='source-tag'>📍 舊版手冊歷史條文對照：{chapter_tag}</span>{clean_content}<br><hr><br>"
+                        
+                        combined_content += (
+                            f"<span class='source-tag'>📍 歷史條文對照（來源：{source_file} - {chapter_tag}）：</span>"
+                            f"{clean_content}<br><hr><br>"
+                        )
 
                 st.markdown(f"<div class='confidence-badge'>✅ 綜合對答結果 (最新政策摘要 + 舊手冊對照)</div>", unsafe_allow_html=True)
                 
-                source_files = ", ".join(set(uploaded_file_names))
                 response_html = (
                     f"{routing_notice}"
                     f"{override_html}"
                     f"<div class='answer-box'>"
-                    f"<b>📋 《員工手冊》歷史條文參考（來源：{source_files}）：</b><br><br>{combined_content}"
+                    f"<b>📋 《員工手冊》歷史條文參考：</b><br><br>{combined_content}"
                     f"</div>"
                     f"<small><i>※ 提示：如最新政策摘要與舊版手冊條文有異，一律以最新通告為準。完整政策檔案請至 <span class='z-drive-path'>Z:\\Hrd-Public Folder\\16.0 人力資源政策及指引</span> 查閱。</i></small>"
                 )
