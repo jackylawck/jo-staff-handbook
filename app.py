@@ -78,7 +78,6 @@ st.markdown("""
 
 # ==========================================
 # 2. 📂 動態載入最新政策變動 (JSON 配置載入)
-# 解耦硬編碼，提高維護彈性與系統管治能力
 # ==========================================
 @st.cache_data(ttl=3600)
 def load_policy_overrides():
@@ -102,7 +101,7 @@ def check_policy_overrides(query):
     return matched_overrides
 
 # ==========================================
-# 3. 🌳 確定性目錄索引與權重路由
+# 3. 🌳 精確章節索引與權重路由 (修正培訓指向)
 # ==========================================
 MANUAL_INDEX_TREE = {
     "chapters": [
@@ -112,7 +111,7 @@ MANUAL_INDEX_TREE = {
         {"id": "ch6", "title": "第六章 假期", "intents": ["休息日", "公眾假期", "年假", "補假", "病假", "事假", "產假", "分娩假", "侍產假", "婚假", "恩恤假", "生日假", "無薪假"]},
         {"id": "ch7", "title": "第七章 員工福利及保障", "intents": ["強積金", "MPF", "醫療", "門診", "住院", "睇醫生", "康樂"]},
         {"id": "ch8", "title": "第八章 績效考核", "intents": ["考核", "評估", "appraisal", "最佳員工", "獎懲"]},
-        {"id": "ch9", "title": "第九章 培訓和發展", "intents": ["培訓", "進修", "資助", "課程", "公司推薦", "個人發展", "服務承諾期", "退還資助"]},
+        {"id": "ch9", "title": "第九章 培訓和發展", "intents": ["培訓", "進修", "資助", "課程", "公司推薦", "個人發展", "服務承諾期", "退還資助", "學費"]},
         {"id": "ch10", "title": "第十章 紀律守則及防貪誠信守則", "intents": ["紀律", "行為", "防貪", "利益衝突", "賄賂", "收禮", "處分", "警告", "偽造紀錄"]},
         {"id": "appx", "title": "附則", "intents": ["保密協議", "電子通訊", "電腦使用"]}
     ],
@@ -122,7 +121,8 @@ MANUAL_INDEX_TREE = {
         "雙糧": "ch5", "花紅": "ch5", "報稅": "ch5",
         "大假": "ch6", "al": "ch6", "sl": "ch6", "醫生紙": "ch6", "補假": "ch6", "請假": "ch6", "年假": "ch6",
         "claim錢": "ch7", "洗牙": "ch7", "津貼": "ch7",
-        "升職": "ch8", "上堂": "ch9", "培訓資助": "ch9", "學費": "ch9",
+        "升職": "ch8", 
+        "上堂": "ch9", "培訓": "ch9", "資助": "ch9", "培訓資助": "ch9", "學費": "ch9", "進修": "ch9", # 嚴格綁定第九章
         "請客": "ch10", "利是": "ch10", "賭錢": "ch10", "保密": "appx"
     }
 }
@@ -133,7 +133,7 @@ def analyze_intent_and_route(query, last_chapters=None):
     
     for kw, ch_id in MANUAL_INDEX_TREE["keywords_to_chapter"].items():
         if kw in q_lower:
-            scores[ch_id] = scores.get(ch_id, 0) + 2
+            scores[ch_id] = scores.get(ch_id, 0) + 3 # 提高精確關鍵字權重
             
     for ch in MANUAL_INDEX_TREE["chapters"]:
         for intent in ch["intents"]:
@@ -157,7 +157,7 @@ def get_embedding_model():
     return HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 
 # ==========================================
-# 4. 🧠 確定性頁碼映射與解析引擎
+# 4. 🧠 校準後的實體頁碼對照表
 # ==========================================
 PAGE_CHAPTER_MAP = {
     2: "序言", 3: "遠景及使命", 4: "目錄", 
@@ -169,8 +169,16 @@ PAGE_CHAPTER_MAP = {
     49: "員工手冊確認書"
 }
 
-def get_chapter_by_page(doc_page_num):
+def get_chapter_by_page_and_text(doc_page_num, text_content):
     actual_page = doc_page_num + 1
+    
+    # 優先從文本內容直接判斷章節標題 (雙重防線)
+    if "第九章" in text_content or "培訓和發展" in text_content or "培訓資助" in text_content:
+        return "第九章 培訓和發展"
+    if "第三章" in text_content and "僱傭條款" in text_content:
+        return "第三章 僱傭條款"
+        
+    # 次要採用頁碼區間判定
     current_ch = "通用條文"
     for p in sorted(PAGE_CHAPTER_MAP.keys()):
         if actual_page >= p:
@@ -202,7 +210,7 @@ def process_pdf_to_chunks(uploaded_file):
         
         for chunk in raw_chunks:
             page_num = chunk.metadata.get("page", 0)
-            chapter_title = get_chapter_by_page(page_num)
+            chapter_title = get_chapter_by_page_and_text(page_num, chunk.page_content)
             
             chunk.metadata["chapter"] = chapter_title
             chunk.metadata["source_file"] = filename
@@ -266,7 +274,7 @@ if uploaded_files:
             
             ensemble_retriever = EnsembleRetriever(
                 retrievers=[bm25_retriever, faiss_retriever], 
-                weights=[0.4, 0.6]
+                weights=[0.3, 0.7] # 提高語意與路由權重
             )
 
 with st.sidebar:
@@ -285,7 +293,7 @@ with st.sidebar:
     st.caption("⚙️ 如遇系統問題或特殊情境，請聯絡 [Jacky Law](https://jackylawck.github.io/jackylawck/) 。")
 
 # ==========================================
-# 6. 快捷提問區 (包含有薪年假與請假)
+# 6. 快捷提問區
 # ==========================================
 prompt = st.chat_input("請輸入您關於人事政策的疑問...")
 
@@ -298,7 +306,7 @@ if not prompt and (ensemble_retriever is not None):
     if col4.button("🌴 有薪年假申請", use_container_width=True): prompt = "我有幾多日有薪年假？請假要提早幾多日申請？"
 
 # ==========================================
-# 7. 智能對話、最新變動動態載入與混合檢索
+# 7. 智能對話與自動向下捲動
 # ==========================================
 for msg in st.session_state.jo_messages:
     with st.chat_message(msg["role"]):
@@ -315,7 +323,6 @@ if prompt:
             st.error(error_msg)
             st.session_state.jo_messages.append({"role": "assistant", "content": error_msg})
         else:
-            # 1. 動態檢查 JSON 中的最新政策變動 (脫敏安全版)
             matched_overrides = check_policy_overrides(prompt)
             override_html = ""
             if matched_overrides:
@@ -326,7 +333,6 @@ if prompt:
                         f"</div>"
                     )
 
-            # 2. 進行章節路由與上下文維護
             routed_chapters = analyze_intent_and_route(prompt, st.session_state.last_chapters)
             st.session_state.last_chapters = routed_chapters
             
@@ -337,7 +343,6 @@ if prompt:
                 enhanced_prompt = f"{prompt} 相關章節聚焦：{chapters_str}"
                 routing_notice = f"<div class='routing-notice'>🔍 系統判定查詢意圖，已自動聚焦於：<b>{chapters_str}</b></div>"
 
-            # 3. 混合檢索手冊歷史原文
             retrieved_docs = ensemble_retriever.invoke(enhanced_prompt)
             
             if retrieved_docs:
@@ -371,6 +376,12 @@ if prompt:
                 
                 st.markdown(response_html.replace(routing_notice, ""), unsafe_allow_html=True) 
                 st.session_state.jo_messages.append({"role": "assistant", "content": response_html})
+                
+                # 自動平滑捲動至頁面最下方 (JavaScript 自動執行)
+                st.components.v1.html(
+                    "<script>window.parent.document.querySelector('section.main').scrollTo({top: 99999, behavior: 'smooth'});</script>",
+                    height=0
+                )
             else:
                 fallback_msg = "抱歉，在手冊中找不到高度相關的條文。建議您換個說法，或聯絡人力資源組。"
                 st.warning(fallback_msg)
