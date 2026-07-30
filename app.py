@@ -120,7 +120,7 @@ MANUAL_INDEX_TREE = {
         "辭職": "ch3", "通知期": "ch3", "試用": "ch3", 
         "打風": "ch4", "黑雨": "ch4", "ot": "ch4", "拍卡": "ch4", "人面識別": "ch4", "地盤打卡": "ch4",
         "雙糧": "ch5", "花紅": "ch5", "報稅": "ch5",
-        "大假": "ch6", "al": "ch6", "sl": "ch6", "醫生紙": "ch6", "補假": "ch6",
+        "大假": "ch6", "al": "ch6", "sl": "ch6", "醫生紙": "ch6", "補假": "ch6", "請假": "ch6", "年假": "ch6",
         "claim錢": "ch7", "洗牙": "ch7", "津貼": "ch7",
         "升職": "ch8", "上堂": "ch9", "培訓資助": "ch9", "學費": "ch9",
         "請客": "ch10", "利是": "ch10", "賭錢": "ch10", "保密": "appx"
@@ -285,7 +285,7 @@ with st.sidebar:
     st.caption("⚙️ 如遇系統問題或特殊情境，請聯絡 [Jacky Law](https://jackylawck.github.io/jackylawck/) 。")
 
 # ==========================================
-# 6. 快捷提問區
+# 6. 快捷提問區 (包含有薪年假與請假)
 # ==========================================
 prompt = st.chat_input("請輸入您關於人事政策的疑問...")
 
@@ -295,7 +295,7 @@ if not prompt and (ensemble_retriever is not None):
     if col1.button("🌪️ 颱風黑雨安排", use_container_width=True): prompt = "八號風球或者黑雨，洗唔洗返工？"
     if col2.button("📷 人面識別考勤", use_container_width=True): prompt = "人面識別打卡點樣運作？外勤地盤點樣打卡？"
     if col3.button("🎓 培訓資助政策", use_container_width=True): prompt = "申請培訓資助有咩要求？離職要唔要退還資助？"
-    if col4.button("🧧 年終花紅雙糧", use_container_width=True): prompt = "年終雙糧同花紅點樣計算？"
+    if col4.button("🌴 有薪年假申請", use_container_width=True): prompt = "我有幾多日有薪年假？請假要提早幾多日申請？"
 
 # ==========================================
 # 7. 智能對話、最新變動動態載入與混合檢索
@@ -315,7 +315,7 @@ if prompt:
             st.error(error_msg)
             st.session_state.jo_messages.append({"role": "assistant", "content": error_msg})
         else:
-            # 1. 動態檢查 JSON 中的最新政策變動
+            # 1. 動態檢查 JSON 中的最新政策變動 (脫敏安全版)
             matched_overrides = check_policy_overrides(prompt)
             override_html = ""
             if matched_overrides:
