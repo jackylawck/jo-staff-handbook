@@ -42,6 +42,15 @@ st.markdown("""
         line-height: 1.6;
         color: #333333;
     }
+    .override-box {
+        background-color: #fff3cd;
+        border-left: 5px solid #ffc107;
+        padding: 15px;
+        border-radius: 4px;
+        margin: 10px 0;
+        line-height: 1.6;
+        color: #664d03;
+    }
     .routing-notice {
         color: #6c757d;
         font-size: 0.9em;
@@ -59,7 +68,34 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 🌳 確定性目錄索引與權重路由
+# 2. 📢 最新公司通告覆蓋矩陣 (Policy Override Matrix)
+# 優先級大於舊版《員工手冊》PDF
+# ==========================================
+POLICY_OVERRIDES = [
+    {
+        "id": "notice_20251231",
+        "keywords": ["雙糧", "13個月薪金", "年終雙糧", "花紅", "酌情花紅", "績效花紅", "薪酬架構", "發放雙糧"],
+        "title": "【最新生效通告】公司薪酬架構優化調整 (發出日期: 2025年12月31日 | 生效日期: 2026年1月1日)",
+        "content": (
+            "<b>致全體同事：</b><br>"
+            "為確保公司能持續提升競爭力，管理層決定於 <b>2026 年 1 月 1 日起正式優化薪酬架構</b>：<br><br>"
+            "• <b>優化制度（績效花紅機制）：</b><br>"
+            "原年終雙糧制度將調整為與公司業績及個人表現掛鈎的<b>「酌情花紅制度」</b>。<br>"
+            "<i>(註：於酬金期 9 月 15 日後入職之僱員，其年終花紅將由董事總經理按表現酌情處理。優化後之獎勵目標旨在參考現有水平或更高，視乎公司營運狀況及績效達成度而定。)</i>"
+        )
+    }
+]
+
+def check_policy_overrides(query):
+    q_lower = query.lower()
+    matched_overrides = []
+    for override in POLICY_OVERRIDES:
+        if any(kw in q_lower for kw in override["keywords"]):
+            matched_overrides.append(override)
+    return matched_overrides
+
+# ==========================================
+# 3. 🌳 確定性目錄索引與權重路由
 # ==========================================
 MANUAL_INDEX_TREE = {
     "chapters": [
@@ -114,7 +150,7 @@ def get_embedding_model():
     return HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 
 # ==========================================
-# 3. 🧠 確定性頁碼映射與解析引擎
+# 4. 🧠 確定性頁碼映射與解析引擎
 # ==========================================
 PAGE_CHAPTER_MAP = {
     2: "序言", 3: "遠景及使命", 4: "目錄", 
@@ -172,7 +208,7 @@ def process_pdf_to_chunks(uploaded_file):
     return chunks
 
 # ==========================================
-# 4. 主畫面佈局與狀態管理
+# 5. 主畫面佈局與狀態管理
 # ==========================================
 st.title("🏗️ 東淦工程有限公司 (Jumbo Orient)")
 st.subheader("東淦員工手冊智能查詢系統 (jo-staff)")
@@ -194,7 +230,7 @@ uploaded_file_names = []
 with st.sidebar:
     st.header("📂 員工手冊上傳")
     uploaded_files = st.file_uploader(
-        "請上傳最新版《月薪員工手冊》PDF 檔案", 
+        "請上傳《月薪員工手冊》PDF 檔案", 
         type=["pdf"], 
         accept_multiple_files=True
     )
@@ -211,16 +247,13 @@ if uploaded_files:
     
     if all_chunks:
         with st.spinner('構建雙引擎混合檢索矩陣中 (FAISS + BM25)...'):
-            # 建立語意向量檢索器 (FAISS)
             embeddings = get_embedding_model()
             vector_db = FAISS.from_documents(all_chunks, embeddings)
             faiss_retriever = vector_db.as_retriever(search_kwargs={"k": 4})
             
-            # 建立關鍵字檢索器 (BM25)
             bm25_retriever = BM25Retriever.from_documents(all_chunks)
             bm25_retriever.k = 4
             
-            # 組合雙引擎 (權重：語意 60% / 關鍵字 40%)
             ensemble_retriever = EnsembleRetriever(
                 retrievers=[bm25_retriever, faiss_retriever], 
                 weights=[0.4, 0.6]
@@ -235,10 +268,13 @@ with st.sidebar:
         st.success("✅ 混合檢索雙引擎已啟動")
     else:
         st.write("尚未上傳檔案。")
+        
+    st.markdown("---")
     st.caption("🌐 **公司網站：** [jumboorient.com.hk](https://jumboorient.com.hk/)")
+    st.caption("⚙️ 如遇系統問題或特殊情境，請聯絡 [Jacky Law](https://jackylawck.github.io/jackylawck/) 。")
 
 # ==========================================
-# 5. 快捷提問區
+# 6. 快捷提問區
 # ==========================================
 prompt = st.chat_input("請輸入您關於人事政策的疑問...")
 
@@ -251,7 +287,7 @@ if not prompt and (ensemble_retriever is not None):
     if col4.button("🧧 年終花紅雙糧", use_container_width=True): prompt = "年終雙糧同花紅點樣計算？"
 
 # ==========================================
-# 6. 智能對話與混合檢索
+# 7. 智能對話、最新通告覆蓋與混合檢索
 # ==========================================
 for msg in st.session_state.jo_messages:
     with st.chat_message(msg["role"]):
@@ -268,6 +304,18 @@ if prompt:
             st.error(error_msg)
             st.session_state.jo_messages.append({"role": "assistant", "content": error_msg})
         else:
+            # 1. 優先檢查是否有最新公司通告覆蓋舊政策
+            matched_overrides = check_policy_overrides(prompt)
+            override_html = ""
+            if matched_overrides:
+                for ov in matched_overrides:
+                    override_html += (
+                        f"<div class='override-box'>"
+                        f"<b>⚠️ {ov['title']}：</b><br><br>{ov['content']}"
+                        f"</div>"
+                    )
+
+            # 2. 進行章節路由與對話上下文繼承
             routed_chapters = analyze_intent_and_route(prompt, st.session_state.last_chapters)
             st.session_state.last_chapters = routed_chapters
             
@@ -277,38 +325,36 @@ if prompt:
                 chapters_str = "、".join(routed_chapters)
                 enhanced_prompt = f"{prompt} 相關章節聚焦：{chapters_str}"
                 routing_notice = f"<div class='routing-notice'>🔍 系統判定查詢意圖，已自動聚焦於：<b>{chapters_str}</b></div>"
-                st.markdown(routing_notice, unsafe_allow_html=True)
 
-            # 執行混合檢索 (Ensemble Retriever 會自動處理 RRF 排序)
+            # 3. 雙引擎混合檢索手冊原文
             retrieved_docs = ensemble_retriever.invoke(enhanced_prompt)
             
             if retrieved_docs:
                 combined_content = ""
                 seen_content_signatures = set()
                 
-                # 取 Top 3 最佳結果顯示
                 for doc in retrieved_docs[:3]:
-                    # 優化去重指紋：只取前 50 個乾淨字元，解決微小差異造成的誤判
                     clean_signature = re.sub(r'\W+', '', doc.page_content)[:50]
                     if clean_signature not in seen_content_signatures:
                         seen_content_signatures.add(clean_signature)
                         
                         chapter_tag = doc.metadata.get("chapter", "通用條文")
                         clean_content = doc.page_content.replace(f"[{chapter_tag}]\n", "").replace("\n", "<br>")
-                        combined_content += f"<span class='source-tag'>📍 來源節錄：{chapter_tag}</span>{clean_content}<br><hr><br>"
+                        combined_content += f"<span class='source-tag'>📍 舊版手冊對照節錄：{chapter_tag}</span>{clean_content}<br><hr><br>"
 
-                st.markdown(f"<div class='confidence-badge'>✅ 綜合檢索結果 (語意 + 關鍵字)</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='confidence-badge'>✅ 綜合檢索結果 (最新通告優先 + 手冊對照)</div>", unsafe_allow_html=True)
                 
                 source_files = ", ".join(set(uploaded_file_names))
                 response_html = (
                     f"{routing_notice}"
+                    f"{override_html}"
                     f"<div class='answer-box'>"
-                    f"<b>📋 擷取原文（來源：{source_files}）：</b><br><br>{combined_content}"
+                    f"<b>📋 《員工手冊》原始條文參考（來源：{source_files}）：</b><br><br>{combined_content}"
                     f"</div>"
-                    f"<small><i>※ 提示：此為系統根據手冊自動比對的結果，若需處理具體個案，請聯絡人力資源組。</i></small>"
+                    f"<small><i>※ 提示：如最新通告與舊版手冊條文有異，一律以 2026年1月1日 生效之最新通告為準。</i></small>"
                 )
                 
-                st.markdown(response_html.replace(routing_notice, ""), unsafe_allow_html=True) 
+                st.markdown(response_html, unsafe_allow_html=True) 
                 st.session_state.jo_messages.append({"role": "assistant", "content": response_html})
             else:
                 fallback_msg = "抱歉，在手冊中找不到高度相關的條文。建議您換個說法，或聯絡人力資源組。"
