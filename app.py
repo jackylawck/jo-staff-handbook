@@ -23,27 +23,32 @@ st.markdown("""
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     .confidence-badge {
-        background-color: #198754 !important;
+        background-color: #0d6efd !important;
         color: #ffffff !important;
         padding: 6px 12px !important;
         border-radius: 20px !important;
         font-size: 0.85em !important;
         font-weight: bold !important;
         display: inline-block !important;
+        margin-bottom: 10px;
     }
     .answer-box {
-        background-color: #e8f5e9;
-        border-left: 5px solid #2e7d32;
+        background-color: #f8f9fa;
+        border-left: 5px solid #0d6efd;
         padding: 15px;
         border-radius: 4px;
         margin: 10px 0;
         line-height: 1.6;
+        color: #333333;
+    }
+    .quick-btn-container {
+        margin-bottom: 20px;
     }
     </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 🛡️ 員工手冊目錄導航矩陣 (Metadata Routing Map)
+# 2. 🛡️ 員工手冊目錄智能導航 (Metadata Routing)
 # ==========================================
 MANUAL_STRUCTURE_MAP = {
     "僱傭與離職": {
@@ -88,15 +93,16 @@ def expand_hr_query_semantics(query):
         return query + " " + " ".join(injected_pointers)
     return query
 
-@st.cache_resource(show_spinner="🔒 正在啟動純本地安全語意組件...")
+@st.cache_resource(show_spinner=False)
 def get_embedding_model():
     return HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 
 # ==========================================
-# 3. 🧠 PDF 結構化解析與切塊引擎
+# 3. 🧠 PDF 結構化解析與切塊引擎 (強化異常處理)
 # ==========================================
 def process_pdf_to_chunks(uploaded_file):
     chunks = []
+    tmp_file_path = ""
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
             tmp_file.write(uploaded_file.getvalue())
@@ -111,43 +117,55 @@ def process_pdf_to_chunks(uploaded_file):
             separators=["\n第", "\n\n", "\n", "。", " "]
         )
         chunks = text_splitter.split_documents(documents)
-        os.remove(tmp_file_path)
         
     except Exception as e:
         st.error(f"解析 PDF 檔案時出錯: {str(e)}")
+    finally:
+        # 確保無論成功或失敗，暫存檔都會被刪除 (修復潛在風險)
+        if tmp_file_path and os.path.exists(tmp_file_path):
+            os.remove(tmp_file_path)
+            
     return chunks
 
 # ==========================================
-# 4. 主畫面佈局 (已統一名稱與說明)
+# 4. 主畫面佈局
 # ==========================================
 st.title("🏗️ 東淦工程有限公司 (Jumbo Orient)")
 st.subheader("東淦員工手冊智能查詢系統 (jo-staff)")
 
 st.info(
     "🔒 **內部數據安全保障：**\n"
-    "本系統採用純本地數據比對技術，您上傳的《員工手冊》PDF 文件只會暫存在當前網頁會話中。"
-    "**當您關閉或重新整理網頁時，數據會獨立徹底銷毀**，絕對不會儲存到互聯網上，請放心使用。"
+    "本系統採用純本地數據比對技術，您上傳的《員工手冊》只會暫存在當前網頁會話中。"
+    "為保障私隱，當您點擊「清除對話」或關閉網頁時，所有紀錄與數據將被立即銷毀。"
 )
 
 vector_db = None
 all_chunks = []
+uploaded_file_names = []
 
 with st.sidebar:
     st.header("📂 員工手冊上傳")
     uploaded_files = st.file_uploader(
-        "請上傳公司《月薪員工手冊》PDF 檔案", 
+        "請上傳公司《月薪員工手冊》PDF 檔案 (支援多版本比對)", 
         type=["pdf"], 
         accept_multiple_files=True
     )
+    
+    if st.button("🗑️ 清除對話與數據", use_container_width=True):
+        st.session_state.jo_messages = []
+        st.rerun()
 
 if uploaded_files:
     for f in uploaded_files:
         all_chunks.extend(process_pdf_to_chunks(f))
+        uploaded_file_names.append(f.name)
     if all_chunks:
-        embeddings = get_embedding_model()
-        vector_db = FAISS.from_documents(all_chunks, embeddings)
+        with st.spinner('構建智能知識庫中，請稍候...'):
+            embeddings = get_embedding_model()
+            vector_db = FAISS.from_documents(all_chunks, embeddings)
 
 with st.sidebar:
+    st.markdown("---")
     st.header("📊 知識庫加載狀態")
     st.write(f"📁 已加載檔案數：{len(uploaded_files) if uploaded_files else 0} 份")
     st.write(f"🧩 解析精準條文段落：{len(all_chunks)} 段")
@@ -157,7 +175,20 @@ with st.sidebar:
     st.caption("⚙️ 系統支援：[Jacky Law](https://jackylawck.github.io/jackylawck/)")
 
 # ==========================================
-# 5. 智能對話介面
+# 5. 快捷提問區 (Quick Prompts)
+# ==========================================
+prompt = st.chat_input("請輸入您關於人事政策的疑問（例如：病假點申請？）...")
+
+if not prompt and (vector_db is not None):
+    st.markdown("<div class='quick-btn-container'><b>💡 常見問題快速查詢：</b></div>", unsafe_allow_html=True)
+    col1, col2, col3, col4 = st.columns(4)
+    if col1.button("🌪️ 颱風黑雨安排", use_container_width=True): prompt = "八號風球或者黑雨，洗唔洗返工？"
+    if col2.button("🤒 病假申請流程", use_container_width=True): prompt = "請病假要點樣申請？有幾多日有薪病假？"
+    if col3.button("💼 辭職通知期", use_container_width=True): prompt = "辭職要補幾多日通知期？"
+    if col4.button("🧧 年終花紅雙糧", use_container_width=True): prompt = "年終雙糧同花紅點樣計算？"
+
+# ==========================================
+# 6. 智能對話介面
 # ==========================================
 if 'jo_messages' not in st.session_state:
     st.session_state.jo_messages = []
@@ -166,38 +197,49 @@ for msg in st.session_state.jo_messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"], unsafe_allow_html=True)
 
-if prompt := st.chat_input("請輸入您關於人事政策的疑問（例如：打風點計？病假點申請？）..."):
+if prompt:
     st.session_state.jo_messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
         if vector_db is None or not all_chunks:
-            st.error("🛑 **系統提示：** 請先在左側上傳《員工手冊》PDF 檔案，否則助理無法幫您翻查條文。")
-            st.session_state.jo_messages.append({"role": "assistant", "content": "未上傳文件。"})
+            error_msg = "🛑 **系統提示：** 請先在左側上傳《員工手冊》PDF 檔案，否則助理無法為您翻查條文。"
+            st.error(error_msg)
+            st.session_state.jo_messages.append({"role": "assistant", "content": error_msg})
         else:
             enhanced_prompt = expand_hr_query_semantics(prompt)
-            docs_and_scores = vector_db.similarity_search_with_score(enhanced_prompt, k=2)
+            # 增加 k 值至 3，確保跨章節問題不遺漏
+            docs_and_scores = vector_db.similarity_search_with_score(enhanced_prompt, k=3)
             
             if docs_and_scores:
-                top_doc, top_score = docs_and_scores[0]
-                confidence = max(60.0, min(99.9, (2.0 - top_score) * 50))
+                # 取得最相關的頂層分數來判定信心 (越接近 0 越好)
+                top_score = docs_and_scores[0][1]
                 
-                combined_content = "<br><br>".join([doc.page_content.replace("\n", "<br>") for doc, score in docs_and_scores])
-                
-                st.success(f"🎯 **已為您透過「目錄矩陣」翻查到最相關的手冊條文：**")
-                st.markdown(f"<div class='confidence-badge'>🎯 語意匹配度 {confidence:.1f}%</div>", unsafe_allow_html=True)
+                # 根據 L2 Distance 進行直觀的分級提示
+                if top_score < 0.8:
+                    relevance_label = "🌟 高度相關"
+                elif top_score < 1.2:
+                    relevance_label = "✅ 具參考價值"
+                else:
+                    relevance_label = "⚠️ 關聯性較低 (請確認關鍵字)"
+
+                combined_content = "<br><hr><br>".join([doc.page_content.replace("\n", "<br>") for doc, score in docs_and_scores])
+                source_files = ", ".join(set(uploaded_file_names))
+
+                st.success(f"系統已根據您的問題，為您優先比對以下手冊章節：")
+                st.markdown(f"<div class='confidence-badge'>{relevance_label}</div>", unsafe_allow_html=True)
                 
                 response_html = (
                     f"<div class='answer-box'>"
-                    f"<b>📋 手冊原文參考：</b><br><br>{combined_content}"
+                    f"<b>📋 擷取原文（來源文件：{source_files}）：</b><br><br>{combined_content}"
                     f"</div>"
-                    f"<br><small><i>※ 提示：此為系統初步比對結果。若有具體個案或疑問，請聯絡人力資源組。</i></small>"
+                    f"<small><i>※ 提示：此為系統從上傳文件中自動比對出的相關段落。若有具體個案或需進一步解釋，請聯絡人力資源組。</i></small>"
                 )
                 
                 st.markdown(response_html, unsafe_allow_html=True)
                 st.session_state.jo_messages.append({"role": "assistant", "content": response_html})
             else:
-                fallback_msg = "抱歉，在手冊中找不到與您問題高度相關的條文，請嘗試使用其他關鍵字或聯絡人力資源組。"
+                fallback_msg = "抱歉，在手冊中找不到與您問題高度相關的條文。建議您換個說法（例如使用書面語），或直接聯絡人力資源組查詢。"
                 st.warning(fallback_msg)
                 st.session_state.jo_messages.append({"role": "assistant", "content": fallback_msg})
