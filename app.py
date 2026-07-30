@@ -385,6 +385,7 @@ with st.sidebar:
     st.markdown("---")
     st.caption("📁 **完整政策目錄：** `Z:\\Hrd-Public Folder\\16.0 人力資源政策及指引`")
     st.caption("🌐 **公司網站：** [jumboorient.com.hk](https://jumboorient.com.hk/)")
+    st.caption("⚙️ 如遇系統問題或特殊情境，請聯絡 [Jacky Law](https://jackylawck.github.io/jackylawck/) 。")
 
 # ==========================================
 # 6. 快捷提問區
