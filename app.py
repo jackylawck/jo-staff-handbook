@@ -131,6 +131,10 @@ def analyze_intent_and_route(query, last_chapters=None):
     q_lower = query.lower()
     scores = {}
     
+    # 若明確提問培訓/資助，強制鎖定第九章，排除第三章誤導
+    if any(kw in q_lower for kw in ["培訓", "資助", "學費", "進修", "上堂"]):
+        return ["第九章 培訓和發展"]
+    
     for kw, ch_id in MANUAL_INDEX_TREE["keywords_to_chapter"].items():
         if kw in q_lower:
             scores[ch_id] = scores.get(ch_id, 0) + 3
@@ -157,7 +161,7 @@ def get_embedding_model():
     return HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 
 # ==========================================
-# 4. 🧠 確定性頁碼映射與雜訊過濾器
+# 4. 🧠 嚴格精確章節對照與正文特徵判斷
 # ==========================================
 PAGE_CHAPTER_MAP = {
     2: "序言", 3: "遠景及使命", 4: "目錄", 
@@ -172,10 +176,13 @@ PAGE_CHAPTER_MAP = {
 def get_chapter_by_page_and_text(doc_page_num, text_content):
     actual_page = doc_page_num + 1
     
-    if "第九章" in text_content or "培訓和發展" in text_content or "培訓資助" in text_content:
+    # 根據條文標題進行精確強制判斷
+    if "第九章" in text_content or "培訓和發展" in text_content or "9.1" in text_content or "9.5" in text_content:
         return "第九章 培訓和發展"
-    if "第三章" in text_content and "僱傭條款" in text_content and "培訓" not in text_content:
+    if "3.7" in text_content or "3.8" in text_content or "3.9" in text_content:
         return "第三章 僱傭條款"
+    if "6.1" in text_content or "6.2" in text_content or "6.4" in text_content:
+        return "第六章 假期"
         
     current_ch = "通用條文"
     for p in sorted(PAGE_CHAPTER_MAP.keys()):
@@ -280,7 +287,7 @@ if uploaded_files:
             
             ensemble_retriever = EnsembleRetriever(
                 retrievers=[bm25_retriever, faiss_retriever], 
-                weights=[0.3, 0.7]
+                weights=[0.2, 0.8] # 提高語意權重至 80%，減少 BM25 盲目匹配關鍵字
             )
 
 with st.sidebar:
@@ -312,7 +319,7 @@ if not prompt and (ensemble_retriever is not None):
     if col4.button("🌴 有薪年假申請", use_container_width=True): prompt = "我有幾多日有薪年假？請假要提早幾多日申請？"
 
 # ==========================================
-# 7. 智能對話 (自然渲染，無強制拉動腳本)
+# 7. 智能對話與精確檢索
 # ==========================================
 for msg in st.session_state.jo_messages:
     with st.chat_message(msg["role"]):
@@ -355,12 +362,18 @@ if prompt:
                 combined_content = ""
                 seen_content_signatures = set()
                 
-                for doc in retrieved_docs[:3]:
+                # 只有當檢索結果真正屬於目標章節時才展示，防止噪音
+                for doc in retrieved_docs:
+                    chapter_tag = doc.metadata.get("chapter", "通用條文")
+                    
+                    # 針對培訓查詢，嚴格過濾非第九章段落
+                    if any(kw in prompt for kw in ["培訓", "資助"]) and "第九章" not in chapter_tag:
+                        continue
+                        
                     clean_signature = re.sub(r'\W+', '', doc.page_content)[:50]
                     if clean_signature not in seen_content_signatures:
                         seen_content_signatures.add(clean_signature)
                         
-                        chapter_tag = doc.metadata.get("chapter", "通用條文")
                         source_file = doc.metadata.get("source_file", "員工手冊")
                         clean_content = doc.page_content.replace(f"[{chapter_tag}]\n", "").replace("\n", "<br>")
                         
@@ -368,6 +381,10 @@ if prompt:
                             f"<span class='source-tag'>📍 歷史條文對照（來源：{source_file} - {chapter_tag}）：</span>"
                             f"{clean_content}<br><hr><br>"
                         )
+
+                # 如果過濾後沒有適當舊條文，僅顯示最新通告摘要，不硬塞噪音段落
+                if not combined_content and matched_overrides:
+                    combined_content = "<i>（舊版手冊未有獨立對應章節，請以頂部最新發布之政策通告為準。）</i>"
 
                 st.markdown(f"<div class='confidence-badge'>✅ 綜合對答結果 (最新政策摘要 + 舊手冊對照)</div>", unsafe_allow_html=True)
                 
