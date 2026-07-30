@@ -209,11 +209,9 @@ def process_pdf_to_chunks(uploaded_file):
         for chunk in raw_chunks:
             text = chunk.page_content.strip()
             
-            # 🧹 雜訊過濾 1：若文字太短（小於 50 字，純頁首/頁尾），直接剔除
             if len(text) < 50:
                 continue
                 
-            # 🧹 雜訊過濾 2：清理頂部頁首重複字樣 (例如: 東淦工程有限公司 員工手冊 XX/51)
             cleaned_text = re.sub(r'東淦工程有限公司\s*員工手冊\s*\d+\s*/\s*\d+', '', text)
             cleaned_text = cleaned_text.strip()
             
@@ -314,7 +312,7 @@ if not prompt and (ensemble_retriever is not None):
     if col4.button("🌴 有薪年假申請", use_container_width=True): prompt = "我有幾多日有薪年假？請假要提早幾多日申請？"
 
 # ==========================================
-# 7. 智能對話與視角精準定位
+# 7. 智能對話 (自然渲染，無強制拉動腳本)
 # ==========================================
 for msg in st.session_state.jo_messages:
     with st.chat_message(msg["role"]):
@@ -373,9 +371,7 @@ if prompt:
 
                 st.markdown(f"<div class='confidence-badge'>✅ 綜合對答結果 (最新政策摘要 + 舊手冊對照)</div>", unsafe_allow_html=True)
                 
-                # 錨點標籤用來頂部對齊
                 response_html = (
-                    f"<div id='latest-answer'></div>"
                     f"{routing_notice}"
                     f"{override_html}"
                     f"<div class='answer-box'>"
@@ -386,12 +382,6 @@ if prompt:
                 
                 st.markdown(response_html.replace(routing_notice, ""), unsafe_allow_html=True) 
                 st.session_state.jo_messages.append({"role": "assistant", "content": response_html})
-                
-                # 精準將畫面平滑拉至最新回答頂部 (Top-View Focus)
-                st.components.v1.html(
-                    "<script>var el = window.parent.document.getElementById('latest-answer'); if(el) { el.scrollIntoView({behavior: 'smooth', block: 'start'}); }</script>",
-                    height=0
-                )
             else:
                 fallback_msg = "抱歉，在手冊中找不到高度相關的條文。建議您換個說法，或聯絡人力資源組。"
                 st.warning(fallback_msg)
