@@ -43,6 +43,8 @@ st.markdown("""
         margin: 10px 0;
         line-height: 1.6;
         color: #333333;
+        max-height: 450px;
+        overflow-y: auto;
     }
     .override-box {
         background-color: #fff3cd;
@@ -73,15 +75,6 @@ st.markdown("""
         font-family: monospace;
         font-weight: bold;
         color: #383d41;
-    }
-    .policy-effective {
-        font-size: 0.85em;
-        color: #856404;
-        background-color: #fff3cd;
-        padding: 2px 10px;
-        border-radius: 12px;
-        display: inline-block;
-        margin-bottom: 8px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -177,16 +170,12 @@ def analyze_intent_and_route(query, last_chapters=None):
     q_lower = query.lower()
     scores = {}
     
-    # === 強制鎖定規則（解決關鍵字衝突） ===
-    # 培訓相關 → 強制鎖定第九章
     if any(kw in q_lower for kw in ["培訓", "資助", "學費", "進修", "上堂", "CPD"]):
         return ["第九章 培訓和發展"]
     
-    # 惡劣天氣 → 強制鎖定第四章
     if any(kw in q_lower for kw in ["打風", "黑雨", "颱風", "八號", "暴雨", "惡劣天氣"]):
         return ["第四章 辦公時間及考勤"]
     
-    # === 加權計分 ===
     for kw, ch_id in MANUAL_INDEX_TREE["keywords_to_chapter"].items():
         if kw in q_lower:
             scores[ch_id] = scores.get(ch_id, 0) + 3
@@ -232,24 +221,17 @@ PAGE_CHAPTER_MAP = {
 def get_chapter_by_page_and_text(doc_page_num, text_content):
     actual_page = doc_page_num + 1
     
-    # === 基於條文編號的精確判斷（優先級最高） ===
-    # 第九章：培訓和發展
     if re.search(r'(9\.\d|第9章|培訓和發展)', text_content):
         return "第九章 培訓和發展"
-    # 第三章：僱傭條款
     if re.search(r'(3\.\d|第3章|僱傭條款)', text_content):
         return "第三章 僱傭條款"
-    # 第四章：辦公時間及考勤
     if re.search(r'(4\.\d|第4章|辦公時間|考勤)', text_content):
         return "第四章 辦公時間及考勤"
-    # 第六章：假期
     if re.search(r'(6\.\d|第6章|假期|年假|病假)', text_content):
         return "第六章 假期"
-    # 第十章：紀律守則
     if re.search(r'(10\.\d|第10章|紀律守則|防貪)', text_content):
         return "第十章 紀律守則及防貪誠信守則"
     
-    # === 頁碼映射（備用） ===
     current_ch = "通用條文"
     for p in sorted(PAGE_CHAPTER_MAP.keys()):
         if actual_page >= p:
@@ -282,11 +264,9 @@ def process_pdf_to_chunks(uploaded_file):
         for chunk in raw_chunks:
             text = chunk.page_content.strip()
             
-            # 雜訊過濾
             if len(text) < 50:
                 continue
                 
-            # 移除頁碼/頁尾雜訊
             cleaned_text = re.sub(r'東淦工程有限公司\s*員工手冊\s*\d+\s*/\s*\d+', '', text)
             cleaned_text = re.sub(r'備忘\s*$', '', cleaned_text, flags=re.MULTILINE)
             cleaned_text = re.sub(r'^第\s*\d+\s*頁\s*$', '', cleaned_text, flags=re.MULTILINE)
@@ -362,10 +342,10 @@ if uploaded_files:
         with st.spinner('構建雙引擎混合檢索矩陣中 (FAISS + BM25)...'):
             embeddings = get_embedding_model()
             vector_db = FAISS.from_documents(all_chunks, embeddings)
-            faiss_retriever = vector_db.as_retriever(search_kwargs={"k": 5})
+            faiss_retriever = vector_db.as_retriever(search_kwargs={"k": 4})
             
             bm25_retriever = BM25Retriever.from_documents(all_chunks)
-            bm25_retriever.k = 5
+            bm25_retriever.k = 4
             
             ensemble_retriever = EnsembleRetriever(
                 retrievers=[bm25_retriever, faiss_retriever], 
@@ -401,7 +381,7 @@ if not prompt and (ensemble_retriever is not None):
     if col4.button("🌴 有薪年假申請", use_container_width=True): prompt = "我有幾多日有薪年假？請假要提早幾多日申請？"
 
 # ==========================================
-# 7. 智能對話
+# 7. 智能對話與視角向上定位
 # ==========================================
 for msg in st.session_state.jo_messages:
     with st.chat_message(msg["role"]):
@@ -453,7 +433,6 @@ if prompt:
                     if target_chapter in doc_chapter or doc_chapter == target_chapter:
                         filtered_docs.append(doc)
             
-            # 若過濾後無結果，退回全部檢索結果（但標註警告）
             if not filtered_docs:
                 filtered_docs = retrieved_docs
                 chapter_warning = True
@@ -464,8 +443,8 @@ if prompt:
                 combined_content = ""
                 seen_signatures = set()
                 
-                for doc in filtered_docs[:4]:
-                    # 改良去重指紋
+                # 限制最多只顯示 2 個最相關段落，避免頁面被拉得太長
+                for doc in filtered_docs[:2]:
                     sig = re.sub(r'[，。、！？；：""''（）\s]+', '', doc.page_content)[:60]
                     if sig in seen_signatures:
                         continue
@@ -481,7 +460,6 @@ if prompt:
                         f"{clean_content}<br><hr><br>"
                     )
 
-                # 若未過濾成功，加註提示
                 if chapter_warning and routed_chapters:
                     combined_content = (
                         f"<i>⚠️ 系統未能精確定位至「{target_chapter}」的條文，以下為相關參考：</i><br><br>"
@@ -490,7 +468,9 @@ if prompt:
 
                 st.markdown(f"<div class='confidence-badge'>✅ 綜合查詢結果</div>", unsafe_allow_html=True)
                 
+                # 在頂部打入定位點 #top-anchor，並使用 max-height 限高 CSS
                 response_html = (
+                    f"<div id='top-anchor'></div>"
                     f"{routing_notice}"
                     f"{override_html}"
                     f"<div class='answer-box'>"
@@ -501,6 +481,21 @@ if prompt:
                 
                 st.markdown(response_html.replace(routing_notice, ""), unsafe_allow_html=True) 
                 st.session_state.jo_messages.append({"role": "assistant", "content": response_html})
+                
+                # 自動強制拉回最新回答的頂部 #top-anchor
+                st.components.v1.html(
+                    """
+                    <script>
+                        setTimeout(function() {
+                            var el = window.parent.document.getElementById('top-anchor');
+                            if (el) {
+                                el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                            }
+                        }, 300);
+                    </script>
+                    """,
+                    height=0
+                )
             else:
                 fallback_msg = "抱歉，在手冊中找不到相關條文。建議換個說法，或聯絡人力資源組。"
                 st.warning(fallback_msg)
